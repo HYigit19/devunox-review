@@ -28,6 +28,12 @@ Adresse: **https://project.review.devunox.ai**
 
 Bei neuem Feedback oder Antworten des Kunden kommt eine Mail an `hyigit@outlook.de` (Cloudflare Email Routing, Absender `review@devunox.ai`). Kunden sehen Neues im Portal und im Widget (blauer Punkt).
 
+## Anbindung devunox CRM
+
+Neues Kunden-Feedback, Kundenantworten und Statuswechsel gehen per signiertem Webhook an das devunox CRM (`CRM_WEBHOOK_URL`, Standard `https://crm.devunox.ai/hooks/review`). Dort werden sie automatisch zu Aufgaben im passenden Projekt. Statusänderungen aus dem CRM kommen über `POST /api/integrations/crm/status` zurück.
+- **Einrichtung:** Das Secret `CRM_WEBHOOK_SECRET` im Worker setzen. Es muss derselbe Wert sein wie `REVIEW_WEBHOOK_SECRET` im CRM. Ohne Secret ist die Anbindung aus.
+- **Sicherheit:** HMAC-SHA256 über Zeitstempel und Inhalt, 5 Minuten gültig. Interne Aufgaben werden nie gesendet.
+
 ## Rechte
 
 - **Kunde**: sieht nur die Projekte seiner Firma, keine internen Aufgaben. Darf eigenes Feedback bearbeiten/löschen, solange es offen ist und niemand geantwortet hat. Status nur: abnehmen oder wieder öffnen.

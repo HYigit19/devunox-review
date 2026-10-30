@@ -9,6 +9,7 @@ import {
   hashPassword, checkPasswordRules, verifyCurrentPassword, createToken, useToken,
 } from "./auth.js";
 import { notifyAdmin } from "./mail.js";
+import { crmPayload, sendToCrm, verifyCrmSignature } from "./crm.js";
 
 const STATUSES = ["offen", "in_arbeit", "pruefen", "erledigt", "abgelehnt"];
 const CATEGORIES = ["fehler", "design", "funktion", "text", "idee"];
@@ -423,6 +424,30 @@ route("POST", "/api/projects/([a-z0-9-]+)/handoff", async (ctx) => {
   return json({ url: target.toString() });
 });
 
+/* ---------------------------------------------------------------- devunox CRM */
+
+// Das CRM meldet Statusänderungen zurück (signiert, ohne Sitzung). Löst keinen Webhook zurück aus.
+route("POST", "/api/integrations/crm/status", async (ctx) => {
+  const { env, request } = ctx;
+  const raw = await request.text();
+  if (!(await verifyCrmSignature(env, request, raw))) throw new HttpError(401, "Ungültige Signatur.", "auth");
+  let b;
+  try { b = JSON.parse(raw); } catch { throw new HttpError(400, "Ungültige Nachricht.", "validation"); }
+  const item = await env.DB.prepare("SELECT * FROM items WHERE id = ?").bind(Number(b.item_id)).first();
+  if (!item) throw new HttpError(404, "Eintrag nicht gefunden.", "not_found");
+  const to = oneOf(b.status, ["offen", "in_arbeit", "pruefen", "erledigt", "abgelehnt"], null);
+  if (!to) throw new HttpError(400, "Unbekannter Status.", "validation");
+  if (to === item.status) return json({ ok: true, unchanged: true });
+  const admin = await env.DB.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY id LIMIT 1").first();
+  const t = nowIso();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE items SET status = ?, updated_at = ?, last_activity_at = ?, last_activity_by = ? WHERE id = ?").bind(to, t, t, admin ? admin.id : null, item.id),
+    env.DB.prepare("INSERT INTO comments (item_id, author_id, kind, body, meta, created_at) VALUES (?, ?, 'status', ?, ?, ?)")
+      .bind(item.id, admin ? admin.id : null, str(b.note, 8000), JSON.stringify({ from: item.status, to, via: "crm" }), t),
+  ]);
+  return json({ ok: true, status: to });
+}, { public: true, crossOrigin: true });
+
 /* ---------------------------------------------------------------- Einträge */
 
 route("GET", "/api/projects/([a-z0-9-]+)/items", async (ctx) => {
@@ -470,7 +495,9 @@ route("POST", "/api/projects/([a-z0-9-]+)/items", async (ctx) => {
     `#${no} ${title}`, body && body !== title ? `\n${body}` : "", "",
     b.page_url ? `Seite: ${safeUrl(b.page_url)}` : "", `Im Review-Portal: ${hubLink(ctx, p, it.id)}`,
   ]);
-  return json({ item: await getItemFull(ctx, it.id) }, 201);
+  const full = await getItemFull(ctx, it.id);
+  if (kind === "feedback") sendToCrm(ctx, crmPayload(ctx, "item.created", p, full));
+  return json({ item: full }, 201);
 }, { bearer: true });
 
 route("GET", "/api/items/(\\d+)", async (ctx) => {
@@ -525,6 +552,7 @@ route("PATCH", "/api/items/(\\d+)", async (ctx) => {
   await env.DB.batch(stmts);
   if (statusChange) {
     await touchItem(env, item.id, user.id);
+    sendToCrm(ctx, crmPayload(ctx, "item.status", project, { ...item, ...next }, { status: { ...statusChange, note } }));
     notifyIfClient(ctx, project, `#${item.no} ${STATUS_DE[statusChange.to]}: ${item.title}`, [
       `${user.name} hat #${item.no} auf „${STATUS_DE[statusChange.to]}“ gesetzt.`, note ? `\n${note}` : "", "",
       `Im Review-Portal: ${hubLink(ctx, project, item.id)}`,
@@ -562,6 +590,7 @@ route("POST", "/api/items/(\\d+)/comments", async (ctx) => {
   const c = await env.DB.prepare("INSERT INTO comments (item_id, author_id, kind, body, created_at) VALUES (?, ?, 'comment', ?, ?) RETURNING id")
     .bind(item.id, user.id, body, nowIso()).first();
   await touchItem(env, item.id, user.id);
+  if (user.role === "client") sendToCrm(ctx, crmPayload(ctx, "item.comment", project, item, { comment: body }));
   notifyIfClient(ctx, project, `Antwort zu #${item.no}: ${item.title}`, [
     `${user.name} hat geantwortet:`, "", body || "(nur Anhang)", "", `Im Review-Portal: ${hubLink(ctx, project, item.id)}`,
   ]);

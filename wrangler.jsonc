@@ -37,7 +37,9 @@
   // Benachrichtigungen an devunox, wenn der Kunde Feedback gibt oder antwortet
   "vars": {
     "MAIL_FROM": "review@devunox.ai",
-    "ADMIN_NOTIFY": "hyigit@outlook.de"
+    "ADMIN_NOTIFY": "hyigit@outlook.de",
+    // devunox CRM: Feedback wird dort automatisch zur Aufgabe im Projekt (Secret CRM_WEBHOOK_SECRET im Dashboard setzen)
+    "CRM_WEBHOOK_URL": "https://crm.devunox.ai/hooks/review"
   },
   "send_email": [{ "name": "EMAIL", "destination_address": "hyigit@outlook.de" }],
 
