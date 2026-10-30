@@ -24,6 +24,7 @@
   const T = {
     de: {
       feedback: "Feedback", placePin: "Pin setzen", placeHint: "Tippe oder klicke auf die Stelle, zu der du etwas sagen möchtest.", cancel: "Abbrechen",
+      moveHint: "Pin sitzt falsch? Einfach an eine andere Stelle klicken.",
       thisPage: "Diese Seite", all: "Alle", showDone: "Erledigte anzeigen", showPins: "Pins zeigen",
       emptyPage: "Auf dieser Seite gibt es noch kein Feedback. Setze einen Pin an die Stelle, die du ansprechen möchtest.",
       emptyAll: "Noch kein Feedback in diesem Projekt.",
@@ -45,6 +46,7 @@
     },
     en: {
       feedback: "Feedback", placePin: "Add pin", placeHint: "Tap or click the spot you want to comment on.", cancel: "Cancel",
+      moveHint: "Wrong spot? Just click somewhere else to move the pin.",
       thisPage: "This page", all: "All", showDone: "Show resolved", showPins: "Show pins",
       emptyPage: "No feedback on this page yet. Add a pin where you want to comment.",
       emptyAll: "No feedback in this project yet.",
@@ -74,7 +76,7 @@
     open: false, view: "list", tab: "page", showDone: false, showPins: true,
     mode: null, draft: null, current: null, busy: false, error: "", notice: "",
   };
-  let host, root, layer, panel, overlay, launcher, toastEl;
+  let host, root, layer, panel, overlay, launcher, dock, toastEl;
 
   /* ------------------------------------------------------------ Hilfen */
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -184,14 +186,18 @@
     root = host.attachShadow({ mode: "open" });
     root.innerHTML = `<style>${STYLE}</style>
       <div class="layer" part="layer"></div>
-      <div class="overlay" hidden><div class="hint"><span>${esc(t("placeHint"))}</span><button class="btn ghost light" data-act="cancel-place">${esc(t("cancel"))}</button></div></div>
-      <button class="launcher" data-act="toggle" aria-label="${esc(t("feedback"))}"></button>
+      <div class="overlay" hidden><div class="hint"><span class="hint-t"></span><button class="btn ghost light" data-act="cancel-place">${esc(t("cancel"))}</button></div></div>
+      <div class="dock">
+        <button class="pinbtn" data-act="quick-place" title="${esc(t("placePin"))}" aria-label="${esc(t("placePin"))}">${I.pinplus}</button>
+        <button class="launcher" data-act="toggle" aria-label="${esc(t("feedback"))}"></button>
+      </div>
       <section class="panel" hidden role="dialog" aria-label="${esc(t("feedback"))}"></section>
       <div class="toast" hidden role="status"></div>`;
     document.documentElement.appendChild(host);
     layer = root.querySelector(".layer");
     overlay = root.querySelector(".overlay");
     launcher = root.querySelector(".launcher");
+    dock = root.querySelector(".dock");
     panel = root.querySelector(".panel");
     toastEl = root.querySelector(".toast");
 
@@ -209,7 +215,17 @@
       if (files.length) { e.preventDefault(); addFiles(f, files); }
     });
     overlay.addEventListener("click", onPlace);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (S.mode === "place") cancelPlace(); else if (S.draft) { S.draft = null; render(); } } });
+    overlay.addEventListener("wheel", forwardWheel, { passive: false });
+    const onEsc = (e) => {
+      if (e.key !== "Escape") return;
+      if (S.mode === "place") cancelPlace();
+      else if (S.draft) { S.draft = null; render(); }
+    };
+    root.addEventListener("keydown", onEsc);
+    document.addEventListener("keydown", onEsc);
+    for (const type of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "touchstart", "touchend", "keydown", "keyup", "keypress", "input", "focusin", "focusout", "contextmenu"]) {
+      host.addEventListener(type, (e) => e.stopPropagation());
+    }
 
     // Pins nachführen: Scrollen (auch in inneren Bereichen), Größe, Navigation, DOM-Änderungen
     addEventListener("scroll", schedule, true);
@@ -238,9 +254,17 @@
     const open = S.items.filter((i) => !["erledigt", "abgelehnt"].includes(i.status)).length;
     const unread = S.items.some((i) => i.unread);
     launcher.innerHTML = `<span class="lbl">${esc(t("feedback"))}</span>${S.user ? `<span class="cnt">${open}</span>` : ""}${unread ? '<span class="dot"></span>' : ""}`;
-    launcher.hidden = S.mode === "place";
+    dock.hidden = S.mode === "place" || !!S.draft;
+    dock.classList.toggle("shift", S.open && !isNarrow());
+    root.querySelector(".pinbtn").hidden = !S.user;
     launcher.classList.toggle("on", S.open);
-    overlay.hidden = S.mode !== "place";
+    overlay.hidden = !(S.mode === "place" || S.draft);
+    overlay.classList.toggle("drafting", !!S.draft);
+    root.querySelector(".hint-t").textContent = S.draft ? t("moveHint") : t("placeHint");
+    root.querySelector('.hint [data-act="cancel-place"]').textContent = t("cancel");
+    const pb = root.querySelector(".pinbtn");
+    pb.title = t("placePin"); pb.setAttribute("aria-label", t("placePin"));
+    launcher.setAttribute("aria-label", t("feedback"));
     panel.hidden = !S.open || S.mode === "place";
     panel.classList.toggle("sheet", isNarrow());
     if (!panel.hidden && (!passive || (S.view === "list" && !panel.contains(root.activeElement)))) panel.innerHTML = renderPanel();
@@ -259,6 +283,7 @@
     return `<header class="ph">
       ${back ? `<button class="icon" data-act="back" aria-label="${esc(t("back"))}">${I.back}</button>` : `<span class="mark">${I.pin}</span>`}
       <div class="pt"><strong>${esc(title)}</strong>${S.project && !back ? `<small>${esc(S.project.name)}</small>` : ""}</div>
+      ${S.user && back ? `<button class="icon accent" data-act="place" title="${esc(t("placePin"))}" aria-label="${esc(t("placePin"))}">${I.pinplus}</button>` : ""}
       <button class="icon" data-act="close" aria-label="${esc(t("close"))}">${I.x}</button>
     </header>`;
   }
@@ -423,7 +448,7 @@
   function renderPins() {
     if (!layer) return;
     const want = [];
-    if (S.showPins && S.mode !== "place") {
+    if (S.showPins) {
       for (const i of pageItems()) {
         const pos = pinPosition(i);
         if (pos) want.push({ key: "i" + i.id, no: i.no, status: i.status, pos, id: i.id, active: S.current && S.current.id === i.id && S.open, unread: i.unread, title: i.title });
@@ -457,7 +482,25 @@
     S.mode = "place";
     S.draft = null;
     S.error = "";
+    S.open = false;
     render();
+  }
+
+  // Mausrad über dem Overlay an den Bereich darunter weitergeben (auch innere Scrollbereiche)
+  function forwardWheel(e) {
+    if (e.target.closest && e.target.closest(".hint")) return;
+    e.preventDefault();
+    host.style.display = "none";
+    let el = document.elementFromPoint(e.clientX, e.clientY);
+    host.style.display = "block";
+    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      const st = getComputedStyle(el);
+      if (/(auto|scroll)/.test(st.overflowY + st.overflowX) && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) {
+        el.scrollBy(e.deltaX, e.deltaY);
+        return;
+      }
+    }
+    window.scrollBy(e.deltaX, e.deltaY);
   }
   function cancelPlace() {
     S.mode = null;
@@ -506,16 +549,17 @@
       el = el.parentElement;
     }
     const r = el.getBoundingClientRect();
-    S.mode = null;
-    S.draft = {
+    const anchor = {
       selector: cssPath(el),
       anchor_text: (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
       rx: r.width ? (x - r.left) / r.width : 0, ry: r.height ? (y - r.top) / r.height : 0,
       px: x + scrollX, py: y + scrollY, sx: x / innerWidth, sy: y / innerHeight,
       vw: innerWidth, vh: innerHeight, cx: x, cy: y,
       page_url: location.href, page_key: pageKey(), page_title: document.title,
-      category: "funktion", priority: "mittel", files: [], shot: true,
     };
+    S.mode = null;
+    // Entwurf offen → nur versetzen, getippter Text bleibt erhalten
+    S.draft = S.draft ? { ...S.draft, ...anchor } : { ...anchor, category: "funktion", priority: "mittel", files: [], shot: true };
     S.draft.capture = capture(x, y).catch(() => null);
     S.open = false;
     render();
@@ -765,8 +809,8 @@
     } else if (act === "close") { S.open = false; render(); }
     else if (act === "back") { S.view = "list"; S.current = null; S.error = ""; render(); }
     else if (act === "tab") { S.tab = b.dataset.tab; render(); }
-    else if (act === "place") startPlace();
-    else if (act === "cancel-place") cancelPlace();
+    else if (act === "place" || act === "quick-place") startPlace();
+    else if (act === "cancel-place") { if (S.draft) { S.draft = null; render(); } else cancelPlace(); }
     else if (act === "cancel-draft") { S.draft = null; const c = root.querySelector(".composer"); if (c) c.remove(); render(); }
     else if (act === "open") openItem(Number(b.dataset.id), e.target.closest(".row") != null);
     else if (act === "goto") gotoItem(S.current);
@@ -817,6 +861,7 @@
     clip: svg('<path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7-7L14 4.5a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/>'),
     file: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>', 16),
     check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+    pinplus: svg('<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><path d="M12 6.5v6M9 9.5h6"/>', 22),
   };
 
   /* ------------------------------------------------------------ Stil */
@@ -838,7 +883,14 @@
   .s-offen{--c:var(--s-offen)}.s-in_arbeit{--c:var(--s-in_arbeit)}.s-pruefen{--c:var(--s-pruefen)}.s-erledigt{--c:var(--s-erledigt)}.s-abgelehnt{--c:var(--s-abgelehnt)}.s-draft{--c:var(--s-draft)}
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 2px #fff;flex:none}
 
-  .launcher{position:fixed;right:0;top:50%;transform:translateY(-50%);pointer-events:auto;border:0;cursor:pointer;
+  .dock{position:fixed;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none}
+  .dock.shift{right:392px}
+  .dock.shift .pinbtn,.dock.shift .launcher{border-radius:12px}
+  .pinbtn{pointer-events:auto;border:0;cursor:pointer;width:46px;height:46px;border-radius:12px 0 0 12px;background:var(--s-offen);color:#fff;
+    display:grid;place-items:center;box-shadow:-2px 4px 16px rgba(229,55,43,.35)}
+  .pinbtn:hover{filter:brightness(1.07)}
+  .icon.accent{color:var(--s-offen)}
+  .launcher{position:relative;pointer-events:auto;border:0;cursor:pointer;
     background:var(--ink);color:#fff;border-radius:10px 0 0 10px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:8px;
     box-shadow:-2px 4px 16px rgba(18,26,46,.25)}
   .launcher .lbl{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:600;font-size:13px;letter-spacing:.02em}
@@ -847,6 +899,7 @@
   .launcher .dot{position:absolute;top:6px;left:6px}
 
   .overlay{position:fixed;inset:0;pointer-events:auto;cursor:crosshair;background:rgba(33,72,245,.06);outline:3px solid var(--blue);outline-offset:-3px}
+  .overlay.drafting{background:transparent;outline:0}
   .hint{position:fixed;left:50%;top:14px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:var(--ink);color:#fff;
     padding:8px 8px 8px 16px;border-radius:12px;font-size:14px;box-shadow:0 8px 24px rgba(18,26,46,.3);cursor:default;max-width:calc(100vw - 24px)}
 
