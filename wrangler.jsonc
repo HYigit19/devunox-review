@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "devunox-review",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+
+  // Eigene Domain project.review.devunox.ai: im Dashboard unter Worker → Settings → Domains & Routes → Custom Domain
+  // (Zertifikat legt Cloudflare automatisch an, auch für mehrstufige Subdomains)
+
+  // Oberfläche + widget.js als statische Dateien. /api/* und /f/* laufen zuerst durch den Worker.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/f/*"]
+  },
+
+  // Kunden, Projekte, Feedback, Antworten – D1 (Standort Westeuropa)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "devunox-review-db",
+      "database_id": "fa92fa58-9f71-4a6e-8c47-27e248e07444"
+    }
+  ],
+
+  // Screenshots und Anhänge – R2 mit Jurisdiktion EU (wird beim ersten Deployment automatisch angelegt)
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "devunox-review-dateien",
+      "jurisdiction": "eu"
+    }
+  ],
+
+  // Benachrichtigungen an devunox, wenn der Kunde Feedback gibt oder antwortet
+  "vars": {
+    "MAIL_FROM": "review@devunox.ai",
+    "ADMIN_NOTIFY": "hyigit@outlook.de"
+  },
+  "send_email": [{ "name": "EMAIL", "destination_address": "hyigit@outlook.de" }],
+
+  "observability": { "enabled": true }
+}
