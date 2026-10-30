@@ -448,6 +448,56 @@ route("POST", "/api/integrations/crm/status", async (ctx) => {
   return json({ ok: true, status: to });
 }, { public: true, crossOrigin: true });
 
+// Das CRM legt Kunde (über die Kundennummer), Kundenzugang und Projekt in einem Schritt an.
+// Bestehender Kunde mit gleicher Kundennummer wird wiederverwendet; der Einladungslink kommt nur für neue Zugänge zurück.
+route("POST", "/api/integrations/crm/project", async (ctx) => {
+  const { env, request, url } = ctx;
+  const raw = await request.text();
+  if (!(await verifyCrmSignature(env, request, raw))) throw new HttpError(401, "Ungültige Signatur.", "auth");
+  let b;
+  try { b = JSON.parse(raw); } catch { throw new HttpError(400, "Ungültige Nachricht.", "validation"); }
+  const customerNo = str(b.customer_no, 40);
+  const companyName = str(b.company_name, 120);
+  const projectName = str(b.project_name, 120);
+  if (!companyName || !projectName) throw new HttpError(400, "Kunde und Projektname fehlen.", "validation");
+  const t = nowIso();
+  let client = customerNo ? await env.DB.prepare("SELECT * FROM clients WHERE customer_no = ?").bind(customerNo).first() : null;
+  if (!client) client = await env.DB.prepare("SELECT * FROM clients WHERE name = ? AND customer_no IS NULL").bind(companyName).first();
+  if (!client) {
+    client = await env.DB.prepare("INSERT INTO clients (name, customer_no, created_at) VALUES (?, ?, ?) RETURNING *").bind(companyName, customerNo || null, t).first();
+  } else if (customerNo && !client.customer_no) {
+    await env.DB.prepare("UPDATE clients SET customer_no = ? WHERE id = ?").bind(customerNo, client.id).run();
+  }
+  // Kundenzugang (genau eine Person je Kunde)
+  let invite_url = null;
+  let user = await env.DB.prepare("SELECT * FROM users WHERE client_id = ?").bind(client.id).first();
+  const email = str(b.contact_email, 200).toLowerCase();
+  if (!user && isEmail(email)) {
+    const taken = await env.DB.prepare("SELECT 1 FROM users WHERE email = ?").bind(email).first();
+    if (!taken) {
+      user = await env.DB.prepare("INSERT INTO users (email, name, role, client_id, lang, created_at) VALUES (?, ?, 'client', ?, ?, ?) RETURNING *")
+        .bind(email, str(b.contact_name, 80) || companyName, client.id, oneOf(b.lang, ["de", "en"], "de"), t).first();
+      invite_url = `${url.origin}/#/link/${await createToken(env, user.id, "invite", 14 * 24 * 60)}`;
+    }
+  }
+  let base = slugify(b.slug || projectName) || "projekt";
+  let project = b.slug ? await env.DB.prepare("SELECT * FROM projects WHERE slug = ? AND client_id = ?").bind(base, client.id).first() : null;
+  if (!project) {
+    let slug = base;
+    for (let n = 2; await env.DB.prepare("SELECT 1 FROM projects WHERE slug = ?").bind(slug).first(); n++) slug = `${base}-${n}`;
+    project = await env.DB.prepare(
+      `INSERT INTO projects (client_id, slug, name, description, app_url, repo_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    ).bind(client.id, slug, projectName, str(b.description, 1000), safeUrl(b.app_url), safeUrl(b.repo_url), t, t).first();
+  }
+  return json({
+    project: { id: project.id, slug: project.slug, name: project.name },
+    client: { id: client.id, name: client.name, customer_no: customerNo || client.customer_no || null },
+    hub_url: `${url.origin}/#/p/${project.slug}`,
+    invite_url,
+    contact_has_access: !!user && !invite_url,
+  }, 201);
+}, { public: true, crossOrigin: true });
+
 /* ---------------------------------------------------------------- Einträge */
 
 route("GET", "/api/projects/([a-z0-9-]+)/items", async (ctx) => {

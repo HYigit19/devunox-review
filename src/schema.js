@@ -2,7 +2,7 @@
 // damit nach einem Deployment kein manueller Migrationsschritt nötig ist.
 // Neue Änderungen: SCHEMA_VERSION erhöhen und Anweisungen unten in MIGRATIONS ergänzen.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const V1 = [
   `CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
@@ -139,7 +139,13 @@ const V1 = [
   )`,
 ];
 
-const MIGRATIONS = { 1: V1 };
+// V2: Kundennummer aus dem devunox CRM (K-10001 …) für die eindeutige Zuordnung
+const V2 = [
+  `ALTER TABLE clients ADD COLUMN customer_no TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS clients_customer_no ON clients(customer_no) WHERE customer_no IS NOT NULL`,
+];
+
+const MIGRATIONS = { 1: V1, 2: V2 };
 
 let ready = null;
 

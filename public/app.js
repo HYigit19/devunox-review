@@ -581,7 +581,7 @@
       <div class="pagehead"><div><h1>${esc(t("clients"))}</h1><div class="sub">${esc(t("clientsSub"))}</div></div><div class="acts"><button class="btn primary" data-act="new-client">${I.plus}${esc(t("newClient"))}</button></div></div>
       ${S.clients.length ? `<div class="table"><table><thead><tr><th>${esc(t("company"))}</th><th>${esc(t("contactName"))}</th><th class="hide-m">${esc(t("projectsN"))}</th><th>${esc(t("status"))}</th><th class="hide-m">${esc(t("lastLogin"))}</th><th></th></tr></thead>
       <tbody>${S.clients.map((c) => `<tr data-act="edit-client" data-id="${c.id}">
-        <td class="t">${esc(c.name)}</td><td>${esc(c.contact_name || "")}<div class="small muted">${esc(c.contact_email || "")}</div></td>
+        <td class="t">${esc(c.name)}${c.customer_no ? `<div class="small muted">${esc(c.customer_no)}</div>` : ""}</td><td>${esc(c.contact_name || "")}<div class="small muted">${esc(c.contact_email || "")}</div></td>
         <td class="hide-m">${c.n_projects}</td><td>${clientBadge(c)}</td><td class="hide-m small muted">${esc(c.last_login ? ago(c.last_login) : t("never"))}</td>
         <td class="nowrap" style="text-align:right"><button class="btn small" data-act="client-link" data-id="${c.id}">${esc(t("newLink"))}</button></td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty"><h3>${esc(t("noClients"))}</h3><button class="btn primary" data-act="new-client">${I.plus}${esc(t("newClient"))}</button></div>`}`);

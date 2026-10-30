@@ -30,12 +30,12 @@ export async function verifyCrmSignature(env, request, body) {
 
 /** Baut die Nachricht für das CRM. */
 export async function crmPayload(ctx, event, project, item, extra = {}) {
-  const c = await ctx.env.DB.prepare("SELECT id, name FROM clients WHERE id = ?").bind(project.client_id).first();
+  const c = await ctx.env.DB.prepare("SELECT id, name, customer_no FROM clients WHERE id = ?").bind(project.client_id).first();
   const origin = ctx.url.origin;
   return {
     event,
     project: { id: project.id, slug: project.slug, name: project.name, app_url: project.app_url || "", hub_url: `${origin}/#/p/${project.slug}` },
-    client: c ? { id: c.id, name: c.name } : null,
+    client: c ? { id: c.id, name: c.name, customer_no: c.customer_no || null } : null,
     item: {
       id: item.id, no: item.no, kind: item.kind, title: item.title, body: item.body, category: item.category, priority: item.priority,
       status: item.status, page_url: item.page_url, internal: !!item.internal, link: `${origin}/#/p/${project.slug}/i/${item.id}`,
