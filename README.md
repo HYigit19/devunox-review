@@ -1,5 +1,7 @@
 # devunox Review
 
+Entwickelt von **devunoxAI** – KI-Automatisierung, Websites, Web-Apps und Dashboards: [www.devunox.ai](https://www.devunox.ai)
+
 Feedback-Tool für Kunden-Apps: Kunden setzen **Pins direkt in der laufenden App**, schreiben einen Kommentar, hängen Bilder und Dokumente an. devunox antwortet, setzt den Status, und der Kunde nimmt die Umsetzung ab.
 
 Adresse: **https://project.review.devunox.ai**
